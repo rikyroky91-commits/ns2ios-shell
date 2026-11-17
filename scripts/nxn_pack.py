@@ -1467,7 +1467,7 @@ def rewriter_identity():
     h = hashlib.sha256()
     h.update('\0'.join([PATCHED_CACHE_KEY_VERSION, os.environ.get('DM_GAME', ''),
                         os.environ.get('DM_GAMES_DIR', '')]).encode())
-    files = [TOOLS / 'patch_nso.py', TOOLS / 'sdk_patches.py'] + sorted((DM / 'games').glob('*/patches.py'))
+    files = [TOOLS / 'patch_nso.py', TOOLS / 'sdk_patches.py', TOOLS / 'ue_cvar.py'] + sorted((DM / 'games').glob('*/patches.py'))   # ue_cvar.py: its NAMES decide main's UE_CVAR rows
     for p in files:
         h.update(b'\0' + p.name.encode() + b'\0')
         try: h.update(p.read_bytes())
