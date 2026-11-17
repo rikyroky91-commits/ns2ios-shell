@@ -59,7 +59,7 @@
 #   With an update: give RomFS and main as comma-separated lists (base game first, e.g. data/v0/RomFS,data/v327680/RomFS); the output is the union of both versions (see main())
 #   Unity type trees need Unity's common string table, which is taken from the first main
 # Pair table: (vertex key, pixel key) of every BNSH variation (every Unity program); dmsh_build uses it to give vertex shaders the outputs their pixel shaders read but they do not write (see dmsh_build.py vs_pad)
-import base64, collections, concurrent.futures as cf, functools, glob, hashlib, json, os, re, struct, subprocess, sys, time, zlib
+import base64, collections, concurrent.futures as cf, functools, glob, hashlib, json, os, posixpath, re, struct, subprocess, sys, time, zlib
 from typing import NoReturn
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../tools'))
 from romfs import os, open, is_image
@@ -2452,6 +2452,11 @@ def oodle_ask(comp, n):
     one Mac host per worker process in its tool mode (dm/host/hle_oodle.c, DM_OODLE_SERVE), fed over a pipe. DM_OODLE_HOST = the host, DM_OODLE_MODULES = the rewritten modules it loads
     (the NSP script sets both for a game with Trinity packs, Oodle PKZ or GFPAK entries, or legacy Unreal paks, profile_guess.py shader_sources). → (the decoded bytes or None, the host is gone)"""
     global _OODLE
+    if os.environ.get('DM_OODLE_OOZ'):   # ooz (pyooz) in this process instead of the game's decoder in the Mac host: Oodle streams only, for a machine with no Mac host (Windows)
+        import ooz
+        try: s = ooz.decompress(bytes(comp), n)
+        except Exception: s = None
+        return (bytes(s), False) if s is not None and len(s) == n else (None, False)
     if _OODLE is None:
         import tempfile
         host, mods = os.environ.get('DM_OODLE_HOST'), os.environ.get('DM_OODLE_MODULES')
@@ -2467,6 +2472,7 @@ def oodle_ask(comp, n):
     return None, got != 0   # 0: the decoder refused the stream, and the host goes on
 
 def oodle_said():   # what the host wrote so far
+    if os.environ.get('DM_OODLE_OOZ'): return '(ooz in this process: it refused the stream)'
     assert _OODLE
     _OODLE[1].seek(0)
     return _OODLE[1].read().decode(errors='replace')
@@ -2566,7 +2572,7 @@ def ue_legacy_jobs(files, parts=64, mains=()):
     for p, r in sorted(paks, key=lambda x: (x[1].endswith('_P.pak'), x[1])):   # patch paks last, so they replace; one view per pak folder (one per version given)
         try:   # all of a pak's names or none: a patch pak read halfway would still replace the base pak's files
             keys[p] = key_of(p); pk = uepak.Pak(p, keys[p])
-            view.update({(os.path.dirname(p), os.path.normpath(pk.mount + name)): (p, r, name, pk.entry(name)['raw']) for name in pk.files})
+            view.update({(os.path.dirname(p), posixpath.normpath(pk.mount + name)): (p, r, name, pk.entry(name)['raw']) for name in pk.files})
         except (OSError, ValueError) as e: print(f'[RED] /{r}: the pak cannot be read ({e}); its shaders are left out', flush=True)
     chunks, taken, folders = {}, {p for p, _ in paks}, {os.path.dirname(p) for p, _ in paks}
     for p, r in sorted(((p, r) for p, r in files if p.endswith('.utoc') and os.path.dirname(p) in folders), key=lambda x: uepak.mount_order(x[0])):
@@ -2607,7 +2613,7 @@ def ue_legacy_shaders(path, rel, names, out, key=None):
     """Files of an Unreal pak with inline shaders (ue_legacy_jobs), each decoded block by block (Zlib and LZ4 in uepak.py; others with the game's own decoder, DRAGON QUEST XI S: LZ5) and scanned
     for the shader records the engine keeps inline; key: the AES key of a pak whose index and entries are encrypted (ue_legacy_jobs) → ue_packages's extra"""
     pk = _PAKS.get(path) or _PAKS.setdefault(path, uepak.Pak(path, key))
-    label = lambda name: re.sub(r"^(\.\./)+", "", os.path.normpath(pk.mount + name))
+    label = lambda name: re.sub(r"^(\.\./)+", "", posixpath.normpath(pk.mount + name))
     return ue_packages(((f'/{rel}#{label(name)}', lambda name=name: pk.read(name, decode=oodle)) for name in names), out)
 
 def ue_io_shaders(path, rel, chunks, out, key=None):

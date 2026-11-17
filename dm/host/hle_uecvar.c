@@ -18,7 +18,7 @@ uint64_t dm_ue_cvar(const char *name) {
 // device profile sets it (DRAGON QUEST VII Reimagined: 200 on the Switch, 1000 on Windows) and the streaming manager reads it again whenever it changes. The host raises a smaller
 // value the game sets to the target, whenever the game sets it back; a larger one, or -1 (no pool size: the engine sizes its pool otherwise), stays. The profile key applies on the
 // Mac; on iOS only DM_UE_TEXTURE_POOL turns it on (Documents/env.txt), until an iPhone run shows the memory fits. DM_UE_TEXTURE_POOL=0 leaves the game's value
-void dm_ue_cvar_tick(void) {
+static void pool_tick(void) {
     static int state = -1, target, nlog; static uint64_t obj_off; static const char *src;
     if (!state) return;
     if (state < 0) {
@@ -42,3 +42,39 @@ void dm_ue_cvar_tick(void) {
         if (nlog < 8) { nlog++; LOG("main: Unreal r.Streaming.PoolSize (%s thread) %d → %d MB (%s)", c ? "render" : "game", cur, target, src); }
     }
 }
+
+// DM_UE_SCREEN_PCT (the settings screen's Render scale for an Unreal game): r.ScreenPercentage, the size of the 3D picture in percent of the output, the HUD drawn at full size
+// after it. The host keeps the variable at the chosen value on every present, so a value the game sets back (a device profile at a console mode change) is replaced again. The
+// variable is a float in Unreal 4 / 5 (TAutoConsoleVariable<float>): a current value outside 1-400 is not taken for one, and nothing is written. 0 or unset leaves the game's value
+static void screen_pct_tick(void) {
+    static int state = -1, nlog; static float target; static uint64_t obj_off;
+    if (!state) return;
+    if (state < 0) {
+        state = 0;
+        const char *e = getenv("DM_UE_SCREEN_PCT");
+        target = e ? (float)atof(e) : 0;
+        if (target <= 0) return;
+        target = target < 25 ? 25 : target > 200 ? 200 : target;
+        obj_off = dm_ue_cvar("r.ScreenPercentage");
+        if (!obj_off) { LOG("[RED] main: Unreal r.ScreenPercentage not found in main by the rewriter (ue_cvar.py; DM_UE_SCREEN_PCT %.0f not applied)", target); return; }
+        LOG("main: Unreal r.ScreenPercentage at main+%#llx, kept at %.0f %% (DM_UE_SCREEN_PCT)", (unsigned long long)obj_off, target);
+        state = 1;
+    }
+    uint8_t *base = NULL;
+    for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "main")) base = g_mod[i].base;
+    uint64_t val;
+    if (!base || !rd((uint64_t)(uintptr_t)(base + obj_off + 0x10), &val, sizeof val) || !val) return;   // not created yet
+    for (int c = 0; c < 2; c++) {
+        float cur, *p = (float *)(uintptr_t)(val + 4 * (uint64_t)c);
+        if (!rd((uint64_t)(uintptr_t)p, &cur, sizeof cur) || cur == target) continue;
+        if (!(cur >= 1 && cur <= 400)) {
+            if (nlog < 8) { nlog++; LOG("[RED] main: Unreal r.ScreenPercentage (%s thread) holds %g, not a percentage: left alone", c ? "render" : "game", cur); }
+            state = 0; return;
+        }
+        uint32_t bits; memcpy(&bits, &target, sizeof bits);
+        dm_guest_write_prepare(p, sizeof *p); __atomic_store_n((uint32_t *)p, bits, __ATOMIC_RELAXED);
+        if (nlog < 8) { nlog++; LOG("main: Unreal r.ScreenPercentage (%s thread) %g -> %.0f %% (DM_UE_SCREEN_PCT)", c ? "render" : "game", cur, target); }
+    }
+}
+
+void dm_ue_cvar_tick(void) { pool_tick(); screen_pct_tick(); }

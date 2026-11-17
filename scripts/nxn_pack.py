@@ -2335,6 +2335,10 @@ def env_for(rows, gdir=None):
                   ('ue_fps_cvar', 'DM_UE_FPS_CVAR')):
         v = one(rows, k)
         if v: lines.append('%s=%s' % (ev, v.strip()))
+    # The shell's hle_fpslock.c ue_fps_cvar() falls back to itself instead of the placeholder's t.MaxFPS when DM_UE_FPS_CVAR
+    # is unset, returns NULL, and ue_rows strcmp()s every Unreal variable against it: an Unreal game crashes at its first
+    # present (DRAGON BALL Sparking! ZERO, sig 11 at lock_find). Always name the variable, the profile's or upstream's default.
+    if not one(rows, 'ue_fps_cvar'): lines.append('DM_UE_FPS_CVAR=t.MaxFPS')
     # ... and the ones that are read as atoi != 0, where the profile writes "on" (atoi("on") is 0, which is off).
     # enc_thread came with the base move of 2026-10-30 (nvn_rec.h g_rec = atoi(getenv("DM_NVN_ENC_THREAD")) > 0 : DM_GAME_ENC_THREAD),
     # and only Need For Speed: Hot Pursuit Remastered sets it ("on": encoding on its own thread, 18.1 -> 16.7 ms of its frame).
@@ -3166,6 +3170,16 @@ def main():
                 for line in smap.read_text(errors='replace').splitlines():
                     c = line.split('\t')
                     if len(c) >= 4 and re.fullmatch(r'[0-9a-f]{16}', c[3]): want.add(c[3])
+            if want and have < len(want):
+                # A slice-writing geometry shader has no library by design: the host replaces it with a stub
+                # (nvn_mtl.m prog_fold_gs) and reads only its _b.json, whose gs_slice names the layer input.
+                libs_of = {n[:16] for n in names if n.endswith('_b.metallib')}
+                for k in sorted(want - libs_of):
+                    if k + '_b.json' not in names: continue
+                    with romfs.open(str(msl_out) + '/' + k + '_b.json', 'rb') as f:
+                        if '"gs_slice"' in f.read().decode('utf-8', 'replace'):
+                            have += 1
+                            say('shader %s: a slice-writing geometry shader, no library needed (the host stubs it)' % k)
             if want and have < len(want):
                 die('%s holds %d shader libraries but shader_map.tsv lists %d shaders: %d would draw nothing on the '
                     'phone' % (msl_out.name, have, len(want), len(want) - have))

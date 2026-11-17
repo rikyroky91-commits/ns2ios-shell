@@ -53,7 +53,7 @@ def rows():
 
 def fixups_keys(path):   # '# KEY<TAB>value' header rows of a rewriter table, as {KEY: value}
     if not path.is_file(): return {}
-    return {m[1]: m[2].strip() for m in re.finditer(r'^# (\w+)\t(.*)$', path.read_text(encoding='utf-8'), re.M)}
+    return {m[1]: m[2].strip() for m in re.finditer(r'^# ([\w:.]+)\t(.*)$', path.read_text(encoding='utf-8'), re.M)}
 
 
 UNKNOWN_LANGUAGES = 'This game\'s files do not list its languages, so some of these may not be in the game. It may then show another one.'

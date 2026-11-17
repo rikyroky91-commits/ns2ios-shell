@@ -19,17 +19,19 @@ private func gameMenuItems() -> [UIMenuElement] {
         UIAction(title: names[l], state: dm_pad_layout() == l ? .on : .off) { _ in dm_pad_layout_set(Int32(l)) }
     }
     let layout = UIMenu(title: "Controller layout", options: .singleSelection, children: layouts)   // a choice's value shows in its submenu: a subtitle would make each row two lines
+    // Move controls: drag each group of keys where the thumbs want it (DmGamepad.m beginEdit); Done saves it for this layout
+    let move: [UIMenuElement] = dm_pad_edit_offered() ? [UIAction(title: "Move controls", image: UIImage(systemName: "arrow.up.and.down.and.arrow.left.and.right")) { _ in dm_pad_edit_begin() }] : []
     var items: [UIMenuElement] = []
     var placed = false
     if let m = gameMenuModel {
         for section in m.sections {
-            var rows: [UIMenuElement] = section == "Controls" ? [layout] : []
+            var rows: [UIMenuElement] = section == "Controls" ? ([layout] as [UIMenuElement]) + move : []
             if section == "Controls" { placed = true }
             for s in m.rows(in: section) where (s.kind == "choice" || s.kind == "toggle") && dm_setting_live(s.env, nil) { rows.append(gameMenuRow(m, s)) }
             if !rows.isEmpty { items.append(UIMenu(options: .displayInline, children: rows)) }
         }
     }
-    if !placed { items.insert(UIMenu(options: .displayInline, children: [layout]), at: 0) }
+    if !placed { items.insert(UIMenu(options: .displayInline, children: ([layout] as [UIMenuElement]) + move), at: 0) }
     return items
 }
 

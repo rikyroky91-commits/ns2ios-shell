@@ -41,7 +41,7 @@
 #        uepak.py job <RomFS> <main NSO> <work dir> [<Mac host> <rewritten modules>]   the shader code archives of every pak, and an Oodle job of their Oodle-compressed shaders (LZ4 ones
 #                                                                       decoded at once); IoStore shader libraries (UE 5.6) decoded at once through the game's Oodle in the host (OodleHost)
 #        uepak.py finish <work dir> <out dir>                           after the host has run the job: the archives with every shader decoded
-import ctypes, json, os, re, struct, sys
+import ctypes, json, os, posixpath, re, struct, sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../tools'))
 from romfs import os, open
 
@@ -50,8 +50,32 @@ JOB_MAGIC, OUT_MAGIC = 0x4a4f4d44, 0x524f4d44   # "DMOJ", "DMOR" (hle_oodle.c)
 FREQ = {0: 'vs', 1: 'hs', 2: 'ds', 3: 'ps', 4: 'gs', 5: 'cs'}   # EShaderFrequency (the archive's frequency census: 0 vertex, 3 pixel, 5 compute)
 
 _cc = None
+_cng, _cng_keys = None, {}
+def _aes_decrypt_cng(key, data):
+    """AES-256 ECB decryption through Windows CNG (bcrypt.dll, every Windows has it; no Python package needed)"""
+    global _cng
+    bc = ctypes.WinDLL('bcrypt')
+    if _cng is None:
+        h = ctypes.c_void_p()
+        if bc.BCryptOpenAlgorithmProvider(ctypes.byref(h), ctypes.c_wchar_p('AES'), None, 0): raise ValueError('BCryptOpenAlgorithmProvider failed')
+        mode = ctypes.create_unicode_buffer('ChainingModeECB')
+        if bc.BCryptSetProperty(h, ctypes.c_wchar_p('ChainingMode'), mode, ctypes.sizeof(mode), 0): raise ValueError('BCryptSetProperty failed')
+        _cng = h
+    hk = _cng_keys.get(key)
+    if hk is None:
+        hk = ctypes.c_void_p()
+        if bc.BCryptGenerateSymmetricKey(_cng, ctypes.byref(hk), None, 0, ctypes.c_char_p(key), len(key), 0): raise ValueError('BCryptGenerateSymmetricKey failed')
+        if len(_cng_keys) > 256:
+            for old in _cng_keys.values(): bc.BCryptDestroyKey(old)
+            _cng_keys.clear()
+        _cng_keys[key] = hk
+    out = ctypes.create_string_buffer(len(data)); moved = ctypes.c_ulong()
+    if bc.BCryptDecrypt(hk, ctypes.c_char_p(bytes(data)), len(data), None, None, 0, out, len(data), ctypes.byref(moved), 0): raise ValueError('BCryptDecrypt failed')
+    return out.raw[:moved.value]
+
 def aes_decrypt(key, data):
-    """AES-256 ECB decryption through CommonCrypto (every Mac has it; no Python package needed)"""
+    """AES-256 ECB decryption through CommonCrypto (every Mac has it; no Python package needed), or Windows CNG on Windows"""
+    if sys.platform == 'win32': return _aes_decrypt_cng(key, data)
     global _cc
     if _cc is None:
         _cc = ctypes.CDLL('/usr/lib/libSystem.B.dylib').CCCrypt
@@ -426,7 +450,7 @@ class Toc:
             if sib != none: todo.append((sib, at))
             if child != none: todo.append((child, here))
             while f != none: nm, f, chunk = files[f]; out[chunk] = here + strs[nm]
-        return {c: re.sub(r'^(\.\./)+', '', os.path.normpath(mount + v)) for c, v in out.items()}
+        return {c: re.sub(r'^(\.\./)+', '', posixpath.normpath(mount + v)) for c, v in out.items()}
     def ucas(self, part):
         if part not in self.files: self.files[part] = open(self.path[:-5] + ('.ucas' if not part else f'_s{part}.ucas'), 'rb')
         return self.files[part]

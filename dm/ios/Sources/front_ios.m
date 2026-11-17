@@ -308,6 +308,8 @@ bool dm_setting_live(const char *env, const char *value) {
     }
     if (!strcmp(env, "DM_SHOW_FPS")) { if (value) [g_root showFPS:atoi(value) != 0]; return true; }
     if (!strcmp(env, "DM_TOUCH_HAPTICS")) { if (value) dm_gamepad_touch_feedback(atoi(value) != 0); return true; }
+    if (!strcmp(env, "DM_PAD_OPACITY")) { if (value) dm_gamepad_set_opacity(atof(value)); return true; }
+    if (!strcmp(env, "DM_PAD_SIZE")) { if (value) dm_gamepad_set_size(atof(value)); return true; }
     if (!strcmp(env, "DM_RUMBLE")) { if (value) { dm_haptics_set_enabled(atoi(value) != 0); LOG("front end: game rumble %s (in-game menu)", atoi(value) ? "on" : "off"); } return true; }
     return false;
 }
